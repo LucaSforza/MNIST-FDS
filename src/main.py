@@ -7,13 +7,14 @@ from torch.utils.data import DataLoader, random_split
 import wandb
 import torch
 from lightning.pytorch.loggers import WandbLogger
-from dataset.loader import load_mnist
+from dataset.ds import Dataset
 
 import lightning.pytorch.callbacks as cb
 
 from omegaconf import OmegaConf
 
 import os
+import importlib
 
 
 @hydra.main(
@@ -26,7 +27,9 @@ def main(cfg: DictConfig):
     wandb_logger = WandbLogger(**cfg.wandb)
 
     model = Net(cfg.net)
-    train_loader, val_loader, test_loader = load_mnist(**cfg.dataset)
+    module = importlib.import_module(cfg.dataset["import"])
+    dataset: Dataset = getattr(module, cfg.dataset["name"])(**cfg.dataset["params"])
+    train_loader, val_loader, test_loader = dataset.division()
     trainer = lit.Trainer(
         logger=wandb_logger,
         callbacks=[
