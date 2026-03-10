@@ -23,6 +23,8 @@ import importlib
     version_base="1.3",
 )
 def main(cfg: DictConfig):
+    print(cfg)
+    exit(1)
     lit.seed_everything(cfg.seed)
     wandb_logger = WandbLogger(**cfg.wandb)
 

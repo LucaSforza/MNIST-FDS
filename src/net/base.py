@@ -1,3 +1,4 @@
+from omegaconf import DictConfig
 import torch
 import lightning as lit
 from torchmetrics import Accuracy
@@ -9,20 +10,20 @@ from hydra.utils import instantiate
 
 from net.cnn import ConvBlock, FeedForwardBlock
 
+
 class Net(lit.LightningModule):
-    def __init__(self,cfg
-                ):
-                 
+    def __init__(self, cfg: DictConfig):
         super(Net, self).__init__()
         self.save_hyperparameters()
         self.depth = cfg.depth
         self.cfg = cfg
 
         self.embed = instantiate(cfg.embed)
-        self.features = nn.Sequential(*[instantiate(cfg.block) for _ in range(self.depth-1)])
-        
-        self.unembed = instantiate(cfg.unembed)   
+        self.features = nn.Sequential(
+            *[instantiate(cfg.block) for _ in range(self.depth - 1)]
+        )
 
+        self.unembed = instantiate(cfg.unembed)
 
     def forward(self, x):
         x = self.embed(x)
@@ -35,25 +36,27 @@ class Net(lit.LightningModule):
         x, y = batch
         y_hat = self(x)
         loss = F.cross_entropy(y_hat, y)
-        self.log('train_loss', loss, prog_bar=True)
+        self.log("train_loss", loss, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
         loss = F.cross_entropy(y_hat, y)
-        self.log('val_loss', loss)
-        self.log('val_acc', accuracy(y_hat, y), prog_bar=True)
+        self.log("val_loss", loss)
+        self.log("val_acc", accuracy(y_hat, y), prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
         loss = F.cross_entropy(y_hat, y)
-        self.log('test_loss', loss)
-        self.log('test_acc', accuracy(y_hat, y), prog_bar=True)
+        self.log("test_loss", loss)
+        self.log("test_acc", accuracy(y_hat, y), prog_bar=True)
 
     def configure_optimizers(self):
         optimizer = instantiate(self.cfg.optimizer, self.parameters())
         return optimizer
-    
-accuracy = Accuracy(task='multiclass', num_classes=10)
+
+
+accuracy = Accuracy(task="multiclass", num_classes=10)
+
