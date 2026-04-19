@@ -1,0 +1,324 @@
+
+=== src/dataset/ds.py ===
+import torch
+from torch.utils.data import DataLoader
+
+from abc import abstractmethod
+
+
+class Dataset(torch.utils.data.Dataset):
+    @abstractmethod
+    def division(self) -> tuple[DataLoader, DataLoader, DataLoader]:
+        raise NotImplementedError("Dataset.division is not implemented by subclasses")
+
+=== src/dataset/__init__.py ===
+
+=== src/dataset/mnist.py ===
+from abc import abstractmethod
+import torch
+import torch.nn as nn
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, random_split
+
+from dataset.ds import Dataset
+
+
+class MNISTDataset(Dataset):
+    def __init__(self, batch_size=32, num_workers=4, train_size=0.8) -> None:
+        super().__init__()
+
+        self.transform = transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+        )
+        # Load the MNIST dataset
+        self.dataset = datasets.MNIST(
+            root="data", train=True, download=True, transform=self.transform
+        )
+        self.test_dataset = datasets.MNIST(
+            root="data", train=False, download=True, transform=self.transform
+        )
+
+        self.train_size: float = train_size
+        self.num_workers: int = num_workers
+        self.batch_size: int = batch_size
+
+    def __getitem__(self, index):
+        return self.dataset[index]
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def division(self) -> tuple[DataLoader, DataLoader, DataLoader]:
+        # Split the dataset into training and validation sets
+        train_size = int(self.train_size * len(self.dataset))
+        val_size = len(self) - train_size
+        train_dataset, val_dataset = random_split(self.dataset, [train_size, val_size])
+
+        # Create DataLoaders for training, validation, and test sets
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
+        test_loader = DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
+        return train_loader, val_loader, test_loader
+
+=== src/net/base.py ===
+from omegaconf import DictConfig
+import torch
+import lightning as lit
+from torchmetrics import Accuracy
+
+import torch.nn as nn
+import torch.nn.functional as F
+
+from hydra.utils import instantiate
+
+from net.cnn import ConvBlock, FeedForwardBlock
+
+
+class Net(lit.LightningModule):
+    def __init__(self, cfg: DictConfig):
+        super(Net, self).__init__()
+        self.save_hyperparameters()
+        self.depth = cfg.depth
+        self.cfg = cfg
+
+        self.embed = instantiate(cfg.embed)
+        self.features = nn.Sequential(
+            *[instantiate(cfg.block) for _ in range(self.depth - 1)]
+        )
+
+        self.unembed = instantiate(cfg.unembed)
+
+    def forward(self, x):
+        x = self.embed(x)
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        x = self.unembed(x)
+        return x
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = F.cross_entropy(y_hat, y)
+        self.log("train_loss", loss, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = F.cross_entropy(y_hat, y)
+        self.log("val_loss", loss)
+        self.log("val_acc", accuracy(y_hat, y), prog_bar=True)
+
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = F.cross_entropy(y_hat, y)
+        self.log("test_loss", loss)
+        self.log("test_acc", accuracy(y_hat, y), prog_bar=True)
+
+    def configure_optimizers(self):
+        optimizer = instantiate(self.cfg.optimizer, self.parameters())
+        return optimizer
+
+
+accuracy = Accuracy(task="multiclass", num_classes=10)
+
+
+=== src/net/cnn.py ===
+import torch.nn as nn
+
+
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, pool_size=2, **_):
+        super(ConvBlock, self).__init__()
+        self.conv = nn.Conv2d(
+            in_channels, out_channels, kernel_size=kernel_size, padding=1
+        )
+        self.relu = nn.ReLU()
+        self.pool = nn.MaxPool2d(kernel_size=pool_size, stride=2)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        return x
+
+
+class FeedForwardBlock(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(FeedForwardBlock, self).__init__()
+        self.fc = nn.Linear(input_dim, output_dim)
+
+    def forward(self, x):
+        x = self.fc(x)
+        return x
+
+
+=== src/__init__.py ===
+
+=== src/main.py ===
+import hydra
+from omegaconf import DictConfig
+import lightning as lit
+from net.base import Net
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, random_split
+import wandb
+import torch
+from lightning.pytorch.loggers import WandbLogger
+from dataset.ds import Dataset
+
+import lightning.pytorch.callbacks as cb
+
+from omegaconf import OmegaConf
+
+import os
+import importlib
+
+
+@hydra.main(
+    config_path="/home/softdream/Programming/gits/MNIST-FDS/cfg",
+    config_name="base",
+    version_base="1.3",
+)
+def main(cfg: DictConfig):
+    print(cfg)
+    exit(1)
+    lit.seed_everything(cfg.seed)
+    wandb_logger = WandbLogger(**cfg.wandb)
+
+    model = Net(cfg.net)
+    module = importlib.import_module(cfg.dataset["import"])
+    dataset: Dataset = getattr(module, cfg.dataset["name"])(**cfg.dataset["params"])
+    train_loader, val_loader, test_loader = dataset.division()
+    trainer = lit.Trainer(
+        logger=wandb_logger,
+        callbacks=[
+            cb.EarlyStopping(
+                monitor="val_acc", patience=3, verbose=True, mode="max", min_delta=1e-2
+            )
+        ],
+        **cfg.trainer,
+    )
+
+    print("Training...")
+    trainer.fit(model, train_loader, val_loader)
+
+    print("Testing...")
+    trainer.test(model, test_loader)
+
+    hyperparams_dict = OmegaConf.to_container(cfg, resolve=True)
+    hyperparams_dict["info"] = {  # type: ignore
+        "num_params": get_num_params(model),
+    }
+
+    torch.save(model, "weights.pt")
+    wandb_logger.log_hyperparams(hyperparams_dict)  # type: ignore
+
+
+def get_num_params(module):
+    """
+    Returns the number of parameters in a Lightning module.
+
+    Args:
+        module (lightning.pytorch.LightningModule): The Lightning module to get the number of parameters for.
+
+    Returns:
+        int: The number of parameters in the module.
+    """
+    total_params = sum(p.numel() for p in module.parameters())
+    return total_params
+
+
+if __name__ == "__main__":
+    os.environ["HYDRA_FULL_ERROR"] = "1"
+    main()
+
+=== cfg/block/conv.yaml ===
+_target_: net.cnn.ConvBlock
+in_channels: ???
+out_channels: ${.in_channels}
+kernel_size: 3
+pool_size: 2
+=== cfg/embed/conv.yaml ===
+_target_: net.cnn.ConvBlock
+in_channels: ???
+out_channels: ???
+kernel_size: 3
+pool_size: 1
+=== cfg/net/default.yaml ===
+defaults:
+ - /block: conv
+ - /embed: conv
+ - /unembed: lazy_linear
+ - /optimizer: adam
+
+depth: ???
+width: ???
+num_classes: ???
+
+block:
+  in_channels: ${..width}
+
+embed:
+  in_channels: 1
+  out_channels: ${..width}
+
+unembed:
+  out_features: ${..num_classes}
+
+optimizer:
+  weight_decay: 0.0005
+
+
+=== cfg/optimizer/adam.yaml ===
+_target_: torch.optim.Adam
+lr: 0.001
+weight_decay: 0.0
+
+=== cfg/unembed/lazy_linear.yaml ===
+_target_: torch.nn.LazyLinear
+out_features: ???
+=== cfg/base.yaml ===
+# conf/config.yaml
+defaults:
+  - _self_
+  - net: default
+
+seed: 42
+
+net:
+  depth: 4
+  width: 32
+  num_classes: 10
+
+trainer:
+  max_epochs: 20
+  log_every_n_steps: 10
+
+dataset:
+  import: dataset.mnist
+  name: MNISTDataset
+  params:
+    batch_size: 1024
+    train_size: 0.8
+
+wandb:
+  # entity: "sforza-2050030"
+  project: "MNIST-FD"
+  name: ${net.depth}x${net.width}

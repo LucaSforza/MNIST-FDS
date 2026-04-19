@@ -1,0 +1,4 @@
+_target_: nn.Linear
+in_features: 350
+out_features: 175
+bias: true

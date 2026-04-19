@@ -1,3 +1,4 @@
+from functorch.dim import Tensor
 from omegaconf import DictConfig
 import torch
 import lightning as lit
@@ -15,6 +16,9 @@ class Net(lit.LightningModule):
     def __init__(self, cfg: DictConfig):
         super(Net, self).__init__()
         self.save_hyperparameters()
+
+        self.residuals: dict[str, Tensor] = dict()
+
         self.depth = cfg.depth
         self.cfg = cfg
 
@@ -59,4 +63,3 @@ class Net(lit.LightningModule):
 
 
 accuracy = Accuracy(task="multiclass", num_classes=10)
-

@@ -1,0 +1,23 @@
+defaults:
+  - layer/layer_0: layer_0
+  - layer/layer_1: layer_1
+  - layer/layer_2: layer_2
+  - layer/layer_3: layer_3
+  - layer/layer_4: layer_4
+  - layer/layer_5: layer_5
+  - layer/layer_6: layer_6
+  - layer/layer_7: layer_7
+
+sequence:
+  level_0:
+    -layer_0
+    -layer_1
+  - layer_1
+  - layer_2
+  - layer_3
+  - layer_4
+  - layer_5
+  - layer_6
+  - layer_7
+
+name: SequentialModel_from_UI

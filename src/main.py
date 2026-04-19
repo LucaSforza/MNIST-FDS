@@ -71,6 +71,15 @@ def get_num_params(module):
     return total_params
 
 
+import convert
+
 if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "convert":
+            to_convert_path = sys.argv[2]
+            convert.build_hydra_configs(to_convert_path, output_dir="cfg2")
+            exit(0)
     os.environ["HYDRA_FULL_ERROR"] = "1"
     main()
